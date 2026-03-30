@@ -12,6 +12,19 @@ class PostgresClient:
 
     _pool: Optional[asyncpg.Pool] = None
 
+    def __init__(self):
+        """Initialize client instance for context manager usage"""
+        pass
+
+    async def __aenter__(self):
+        """Async context manager entry"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - close connection"""
+        await self.close()
+        return False
+
     @classmethod
     async def get_pool(cls) -> asyncpg.Pool:
         if cls._pool is None:
@@ -77,21 +90,20 @@ class PostgresClient:
         await cls.execute(query, event, source, affected, direction, magnitude, reasoning, confidence)
 
     @classmethod
-    async def save_prices(cls, symbol: str, prices: List[Dict[str, Any]]) -> int:
+    async def save_prices(cls, symbol: str, market: str, prices: List[Dict[str, Any]]) -> int:
         """Save price data, return count inserted"""
         if not prices:
             return 0
 
         query = """
-        INSERT INTO stock_prices (symbol, date, open, high, low, close, volume, amount)
+        INSERT INTO stock_prices (symbol, market, date, open, high, low, close, volume)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (symbol, date) DO UPDATE SET
             open = EXCLUDED.open,
             high = EXCLUDED.high,
             low = EXCLUDED.low,
             close = EXCLUDED.close,
-            volume = EXCLUDED.volume,
-            amount = EXCLUDED.amount
+            volume = EXCLUDED.volume
         """
 
         pool = await cls.get_pool()
@@ -101,13 +113,13 @@ class PostgresClient:
                 await conn.execute(
                     query,
                     symbol,
+                    market,
                     price.get("date"),
                     price.get("open"),
                     price.get("high"),
                     price.get("low"),
                     price.get("close"),
-                    price.get("volume"),
-                    price.get("amount")
+                    price.get("volume")
                 )
                 count += 1
             return count

@@ -12,6 +12,19 @@ class Neo4jClient:
 
     _instance: Optional[AsyncDriver] = None
 
+    def __init__(self):
+        """Initialize client instance for context manager usage"""
+        pass
+
+    async def __aenter__(self):
+        """Async context manager entry"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - close connection"""
+        await self.close()
+        return False
+
     @classmethod
     async def get_driver(cls) -> AsyncDriver:
         if cls._instance is None:

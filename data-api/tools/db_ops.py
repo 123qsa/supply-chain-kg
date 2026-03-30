@@ -24,53 +24,42 @@ async def save_price_batch(
     """
     try:
         async with PostgresClient() as db:
-            # Format prices for TimescaleDB
-            formatted_prices = [
-                {
-                    "ticker": ticker,
-                    "market": market,
-                    "date": p.get("date"),
-                    "open": p.get("open", 0),
-                    "high": p.get("high", 0),
-                    "low": p.get("low", 0),
-                    "close": p.get("close", 0),
-                    "volume": p.get("volume", 0)
-                }
-                for p in prices
-            ]
-
-            await db.save_prices(ticker, market, formatted_prices)
-            return {"success": True, "count": len(prices)}
+            count = await db.save_prices(ticker, market, prices)
+            return {"success": True, "count": count}
     except Exception as e:
         logger.error(f"save_price_batch failed for {ticker}: {e}")
         return {"success": False, "error": str(e)}
 
 
 async def log_discovery_event(
-    source: str,
+    explorer: str,
     discovered: List[str],
     discovery_type: str = "bfs",
-    metadata: Optional[Dict[str, Any]] = None
+    source: str = "auto",
+    depth: int = 0
 ) -> bool:
     """Log a discovery event
 
     Args:
-        source: Source company symbol
+        explorer: Source company symbol
         discovered: List of discovered symbols
         discovery_type: Type of discovery (bfs, peers, etf, etc.)
-        metadata: Optional metadata
+        source: Data source (e.g., openbb, akshare)
+        depth: Discovery depth in BFS traversal
 
     Returns:
         True if successful
     """
     try:
         async with PostgresClient() as db:
-            await db.log_discovery(
-                source=source,
-                discovered_count=len(discovered),
-                discovery_type=discovery_type,
-                metadata=metadata or {}
-            )
+            for symbol in discovered:
+                await db.log_discovery(
+                    explorer=explorer,
+                    discovered=symbol,
+                    relation_type=discovery_type,
+                    source=source,
+                    depth=depth
+                )
             return True
     except Exception as e:
         logger.error(f"log_discovery_event failed: {e}")
@@ -79,7 +68,8 @@ async def log_discovery_event(
 
 async def log_impact_analysis(
     event: str,
-    ticker: str,
+    affected_ticker: str,
+    source_ticker: str,
     impact_score: float,
     direction: str,
     confidence: float,
@@ -89,7 +79,8 @@ async def log_impact_analysis(
 
     Args:
         event: Event description
-        ticker: Affected company ticker
+        affected_ticker: Affected company ticker
+        source_ticker: Source/origin company ticker
         impact_score: Numerical impact score
         direction: Impact direction (利好/利空/中性)
         confidence: Confidence level (0-1)
@@ -102,16 +93,26 @@ async def log_impact_analysis(
         async with PostgresClient() as db:
             await db.log_impact(
                 event=event,
-                ticker=ticker,
-                impact_score=impact_score,
+                source=source_ticker,
+                affected=affected_ticker,
                 direction=direction,
-                confidence=confidence,
-                reasoning=reasoning
+                magnitude=_score_to_magnitude(impact_score),
+                reasoning=reasoning,
+                confidence=confidence
             )
             return True
     except Exception as e:
         logger.error(f"log_impact_analysis failed: {e}")
         return False
+
+
+def _score_to_magnitude(score: float) -> str:
+    """Convert numerical score to magnitude string"""
+    if score >= 0.7:
+        return "高"
+    elif score >= 0.4:
+        return "中"
+    return "低"
 
 
 async def get_price_history(
@@ -133,9 +134,16 @@ async def get_price_history(
     """
     try:
         async with PostgresClient() as db:
-            # Query TimescaleDB hypertable
-            # This would be implemented in PostgresClient
-            return []
+            rows = await db.fetch(
+                """
+                SELECT date, open, high, low, close, volume
+                FROM stock_prices
+                WHERE symbol = $1 AND market = $2 AND date BETWEEN $3 AND $4
+                ORDER BY date ASC
+                """,
+                ticker, market, start_date, end_date
+            )
+            return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"get_price_history failed: {e}")
         return []
@@ -156,8 +164,26 @@ async def get_discovery_history(
     """
     try:
         async with PostgresClient() as db:
-            # Query discovery log
-            return []
+            if source:
+                rows = await db.fetch(
+                    """
+                    SELECT explorer_ticker, discovered_ticker, relation_type, source, depth, discovered_at
+                    FROM discovery_log
+                    WHERE explorer_ticker = $1 AND discovered_at > NOW() - INTERVAL '%s days'
+                    ORDER BY discovered_at DESC
+                    """ % days,
+                    source
+                )
+            else:
+                rows = await db.fetch(
+                    """
+                    SELECT explorer_ticker, discovered_ticker, relation_type, source, depth, discovered_at
+                    FROM discovery_log
+                    WHERE discovered_at > NOW() - INTERVAL '%s days'
+                    ORDER BY discovered_at DESC
+                    """ % days
+                )
+            return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"get_discovery_history failed: {e}")
         return []
@@ -180,8 +206,30 @@ async def get_impact_history(
     """
     try:
         async with PostgresClient() as db:
-            # Query impact log
-            return []
+            conditions = ["analyzed_at > NOW() - INTERVAL '%s days'" % days]
+            params = []
+            param_idx = 1
+
+            if ticker:
+                conditions.append(f"affected_ticker = ${param_idx}")
+                params.append(ticker)
+                param_idx += 1
+
+            if event:
+                conditions.append(f"event_description ILIKE ${param_idx}")
+                params.append(f"%{event}%")
+                param_idx += 1
+
+            query = f"""
+                SELECT event_description, source_ticker, affected_ticker,
+                       direction, magnitude, reasoning, confidence, analyzed_at
+                FROM event_impact_log
+                WHERE {' AND '.join(conditions)}
+                ORDER BY analyzed_at DESC
+            """
+
+            rows = await db.fetch(query, *params)
+            return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"get_impact_history failed: {e}")
         return []
@@ -194,16 +242,33 @@ async def cleanup_old_data(
     """Clean up old data from tables
 
     Args:
-        table: Table name
+        table: Table name (stock_prices, discovery_log, event_impact_log)
         days_to_keep: Number of days of data to retain
 
     Returns:
         Cleanup results
     """
+    valid_tables = {
+        "stock_prices": "date",
+        "discovery_log": "discovered_at",
+        "event_impact_log": "analyzed_at"
+    }
+
+    if table not in valid_tables:
+        return {"success": False, "error": f"Invalid table: {table}"}
+
     try:
         async with PostgresClient() as db:
-            # Delete old records
-            return {"success": True, "deleted": 0}
+            date_column = valid_tables[table]
+            result = await db.execute(
+                f"""
+                DELETE FROM {table}
+                WHERE {date_column} < NOW() - INTERVAL '{days_to_keep} days'
+                """
+            )
+            # Parse result like "DELETE 100"
+            deleted = int(result.split()[1]) if result and len(result.split()) > 1 else 0
+            return {"success": True, "deleted": deleted}
     except Exception as e:
         logger.error(f"cleanup_old_data failed: {e}")
         return {"success": False, "error": str(e)}

@@ -25,14 +25,13 @@ async def upsert_company(
     """
     try:
         async with Neo4jClient() as neo4j:
-            company_data = {
-                "ticker": ticker,
-                "name": name,
-                "market": market,
-                **properties
-            }
-            await neo4j.create_company(company_data)
-            return True
+            result = await neo4j.create_company(
+                ticker=ticker,
+                name=name,
+                market=market,
+                depth=properties.get("depth", 0)
+            )
+            return result is not None
     except Exception as e:
         logger.error(f"upsert_company failed for {ticker}: {e}")
         return False
