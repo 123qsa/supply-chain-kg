@@ -2,6 +2,14 @@
 
 A comprehensive supply chain knowledge graph system with Neo4j (memory layer) and LLM (reasoning layer), orchestrated via n8n workflows.
 
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[Complete Guide](docs/GUIDE.md)** | Detailed documentation with API reference, data models, and troubleshooting |
+| [Design Spec](docs/superpowers/specs/2026-03-29-supply-chain-kg-design.md) | Original design specification |
+| [Implementation Plan](docs/superpowers/plans/2026-03-29-supply-chain-kg-plan.md) | 27-task implementation plan |
+
 ## Architecture
 
 ```
