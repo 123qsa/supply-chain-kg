@@ -1,0 +1,73 @@
+{
+  "name": "WF-5: Graph Analytics",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_stats",
+      "name": "Get Graph Statistics",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_graph_stats",
+        "body": {}
+      }
+    },
+    {
+      "id": "analyze_metrics",
+      "name": "Calculate Metrics",
+      "type": "n8n-nodes-base.function",
+      "position": [650, 300],
+      "parameters": {
+        "functionCode": "const stats = $input.all()[0].json;\n\n// Calculate derived metrics\nconst density = stats.node_count > 1 \n  ? (stats.edge_count / (stats.node_count * (stats.node_count - 1))) * 100\n  : 0;\n\nconst avgDegree = stats.node_count > 0\n  ? (stats.edge_count * 2) / stats.node_count\n  : 0;\n\nreturn [{\n  json: {\n    ...stats,\n    density: density.toFixed(4),\n    avg_degree: avgDegree.toFixed(2),\n    report_date: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "save_report",
+      "name": "Save Analytics Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_discovery_event",
+        "body": {
+          "source": "analytics",
+          "found": "={{ JSON.stringify({\n            node_count: $json.node_count,\n            edge_count: $json.edge_count,\n            density: $json.density,\n            avg_degree: $json.avg_degree\n          }) }}",
+          "method": "graph_analytics",
+          "market": "us"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [[{"node": "Get Graph Statistics", "type": "main", "index": 0}]]
+    },
+    "Get Graph Statistics": {
+      "main": [[{"node": "Calculate Metrics", "type": "main", "index": 0}]]
+    },
+    "Calculate Metrics": {
+      "main": [[{"node": "Save Analytics Report", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["analytics", "graph", "weekly"]
+}

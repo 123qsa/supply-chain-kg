@@ -1,0 +1,116 @@
+{
+  "name": "WF-4: Price Alert Monitor",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_watchlist",
+      "name": "Get Watchlist",
+      "type": "n8n-nodes-base.set",
+      "position": [450, 300],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "symbols",
+              "value": "[\"NVDA\", \"AMD\", \"INTC\", \"QCOM\", \"AVGO\"]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fetch_prices",
+      "name": "Fetch Current Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_price",
+        "body": {
+          "symbol": "={{ JSON.parse($json.symbols)[0] }}",
+          "start_date": "={{ new Date().toISOString().split('T')[0] }}",
+          "end_date": "={{ new Date().toISOString().split('T')[0] }}",
+          "market": "us"
+        }
+      }
+    },
+    {
+      "id": "check_threshold",
+      "name": "Check Alert Threshold",
+      "type": "n8n-nodes-base.if",
+      "position": [850, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json[0]?.change_percent || 0 }}",
+              "operation": "larger",
+              "value2": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "send_alert",
+      "name": "Send Alert Notification",
+      "type": "n8n-nodes-base.slack",
+      "position": [1050, 200],
+      "parameters": {
+        "channel": "#price-alerts",
+        "text": "🚨 Price Alert: {{ $json[0].symbol }} moved {{ $json[0].change_percent }}% today!"
+      }
+    },
+    {
+      "id": "log_alert",
+      "name": "Log Alert",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1250, 200],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alerts (ticker, price, change_percent, alert_time) VALUES ($1, $2, $3, NOW())",
+        "parameters": "={{ [$json[0].symbol, $json[0].close, $json[0].change_percent] }}"
+      }
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [[{"node": "Get Watchlist", "type": "main", "index": 0}]]
+    },
+    "Get Watchlist": {
+      "main": [[{"node": "Fetch Current Prices", "type": "main", "index": 0}]]
+    },
+    "Fetch Current Prices": {
+      "main": [[{"node": "Check Alert Threshold", "type": "main", "index": 0}]]
+    },
+    "Check Alert Threshold": {
+      "main": [
+        [{"node": "Send Alert Notification", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Send Alert Notification": {
+      "main": [[{"node": "Log Alert", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["alert", "price", "monitoring"]
+}

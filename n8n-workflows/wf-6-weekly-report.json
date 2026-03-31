@@ -1,0 +1,104 @@
+{
+  "name": "WF-6: Weekly Report Generation",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Weekly Report Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_graph_stats",
+      "name": "Get Graph Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_graph_stats",
+        "body": {}
+      }
+    },
+    {
+      "id": "get_discovery_log",
+      "name": "Get Discovery History",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_discovery_history",
+        "body": {
+          "limit": 100
+        }
+      }
+    },
+    {
+      "id": "get_impact_log",
+      "name": "Get Impact History",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 600],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_impact_history",
+        "body": {
+          "limit": 50
+        }
+      }
+    },
+    {
+      "id": "generate_report",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.function",
+      "position": [700, 400],
+      "parameters": {
+        "functionCode": "const stats = $input.all()[0].json;\nconst discovery = $input.all()[1]?.json || [];\nconst impact = $input.all()[2]?.json || [];\n\nconst report = {\n  title: 'Supply Chain KG Weekly Report',\n  generated_at: new Date().toISOString(),\n  period: 'Last 7 days',\n  summary: {\n    total_companies: stats.node_count || 0,\n    total_relationships: stats.edge_count || 0,\n    discoveries_this_week: discovery.length,\n    impact_analyses: impact.length\n  },\n  top_discoveries: discovery.slice(0, 5),\n  recent_impacts: impact.slice(0, 5)\n};\n\nreturn [{ json: report }];"
+      }
+    },
+    {
+      "id": "send_report",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.sendEmail",
+      "position": [900, 400],
+      "parameters": {
+        "toEmail": "admin@example.com",
+        "subject": "Supply Chain KG Weekly Report - {{ new Date().toISOString().split('T')[0] }}",
+        "text": "Weekly Report:\n\nTotal Companies: {{ $json.summary.total_companies }}\nTotal Relationships: {{ $json.summary.total_relationships }}\nNew Discoveries: {{ $json.summary.discoveries_this_week }}\nImpact Analyses: {{ $json.summary.impact_analyses }}\n\nGenerated at: {{ $json.generated_at }}"
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Report Schedule": {
+      "main": [
+        [{"node": "Get Graph Stats", "type": "main", "index": 0}],
+        [{"node": "Get Discovery History", "type": "main", "index": 0}],
+        [{"node": "Get Impact History", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Graph Stats": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Get Discovery History": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Get Impact History": {
+      "main": [[{"node": "Generate Report", "type": "main", "index": 0}]]
+    },
+    "Generate Report": {
+      "main": [[{"node": "Send Email Report", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["report", "weekly", "summary"]
+}

@@ -1,0 +1,91 @@
+{
+  "name": "WF-0: Seed Initialization",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [250, 300],
+      "parameters": {}
+    },
+    {
+      "id": "seed_company",
+      "name": "Seed Company",
+      "type": "n8n-nodes-base.set",
+      "position": [450, 300],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "ticker",
+              "value": "NVDA"
+            },
+            {
+              "name": "name",
+              "value": "NVIDIA Corporation"
+            },
+            {
+              "name": "market",
+              "value": "us"
+            },
+            {
+              "name": "sector",
+              "value": "Technology"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "upsert_seed",
+      "name": "Upsert Seed Company",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/upsert_company",
+        "body": {
+          "ticker": "={{ $json.ticker }}",
+          "name": "={{ $json.name }}",
+          "market": "={{ $json.market }}",
+          "sector": "={{ $json.sector }}"
+        },
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "log_seed",
+      "name": "Log Seed Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_discovery_event",
+        "body": {
+          "source": "NVDA",
+          "found": ["NVDA"],
+          "method": "seed",
+          "market": "us"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{"node": "Seed Company", "type": "main", "index": 0}]]
+    },
+    "Seed Company": {
+      "main": [[{"node": "Upsert Seed Company", "type": "main", "index": 0}]]
+    },
+    "Upsert Seed Company": {
+      "main": [[{"node": "Log Seed Event", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["seed", "initialization"]
+}

@@ -24,9 +24,16 @@ from tools import (
     batch_upsert_companies,
     batch_upsert_relationships,
     get_company_neighbors,
+    find_paths,
+    get_subgraph,
+    delete_company,
+    get_graph_stats,
     save_price_batch,
     log_discovery_event,
     log_impact_analysis,
+    get_price_history,
+    get_discovery_history,
+    get_impact_history,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,10 +76,17 @@ TOOLS: Dict[str, Callable] = {
     "batch_upsert_companies": batch_upsert_companies,
     "batch_upsert_relationships": batch_upsert_relationships,
     "get_company_neighbors": get_company_neighbors,
+    "find_paths": find_paths,
+    "get_subgraph": get_subgraph,
+    "delete_company": delete_company,
+    "get_graph_stats": get_graph_stats,
     # DB operations
     "save_price_batch": save_price_batch,
     "log_discovery_event": log_discovery_event,
     "log_impact_analysis": log_impact_analysis,
+    "get_price_history": get_price_history,
+    "get_discovery_history": get_discovery_history,
+    "get_impact_history": get_impact_history,
 }
 
 
@@ -256,6 +270,134 @@ TOOL_SCHEMAS = {
                 "prices": {"type": "array"}
             },
             "required": ["ticker", "market", "prices"]
+        }
+    },
+    "discover_institutional": {
+        "name": "discover_institutional",
+        "description": "Discover institutional holders for a given stock symbol",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock symbol (e.g., NVDA)"},
+                "market": {"type": "string", "description": "Market type: us or cn", "default": "us"}
+            },
+            "required": ["symbol"]
+        }
+    },
+    "get_financials": {
+        "name": "get_financials",
+        "description": "Get financial data for a company",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock symbol"},
+                "market": {"type": "string", "description": "Market type", "default": "us"}
+            },
+            "required": ["symbol"]
+        }
+    },
+    "generate_impact_summary": {
+        "name": "generate_impact_summary",
+        "description": "Generate human-readable impact summary from analysis results",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "analysis_results": {"type": "array", "description": "Analysis results from analyze_event_impact"},
+                "event": {"type": "string", "description": "Event description"}
+            },
+            "required": ["analysis_results", "event"]
+        }
+    },
+    "batch_upsert_relationships": {
+        "name": "batch_upsert_relationships",
+        "description": "Batch upsert multiple relationships",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "relationships": {"type": "array", "description": "List of relationship objects with source, target, relation_type"}
+            },
+            "required": ["relationships"]
+        }
+    },
+    "find_paths": {
+        "name": "find_paths",
+        "description": "Find paths between two companies in the knowledge graph",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start": {"type": "string", "description": "Starting company ticker"},
+                "end": {"type": "string", "description": "Ending company ticker"},
+                "max_depth": {"type": "integer", "description": "Maximum path depth", "default": 4}
+            },
+            "required": ["start", "end"]
+        }
+    },
+    "get_subgraph": {
+        "name": "get_subgraph",
+        "description": "Extract subgraph around a company",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Center company ticker"},
+                "depth": {"type": "integer", "description": "Depth of subgraph", "default": 2}
+            },
+            "required": ["ticker"]
+        }
+    },
+    "delete_company": {
+        "name": "delete_company",
+        "description": "Delete a company node from the knowledge graph",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Company ticker to delete"}
+            },
+            "required": ["ticker"]
+        }
+    },
+    "get_graph_stats": {
+        "name": "get_graph_stats",
+        "description": "Get knowledge graph statistics",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    "get_price_history": {
+        "name": "get_price_history",
+        "description": "Query price history from TimescaleDB",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Stock ticker"},
+                "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
+                "limit": {"type": "integer", "description": "Max rows to return", "default": 1000}
+            },
+            "required": ["ticker"]
+        }
+    },
+    "get_discovery_history": {
+        "name": "get_discovery_history",
+        "description": "Query discovery history log",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "Source symbol filter"},
+                "method": {"type": "string", "description": "Discovery method filter"},
+                "limit": {"type": "integer", "description": "Max rows", "default": 100}
+            }
+        }
+    },
+    "get_impact_history": {
+        "name": "get_impact_history",
+        "description": "Query impact analysis history",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_keyword": {"type": "string", "description": "Event keyword filter"},
+                "limit": {"type": "integer", "description": "Max rows", "default": 100}
+            }
         }
     },
 }

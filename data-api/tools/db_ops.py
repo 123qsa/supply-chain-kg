@@ -32,33 +32,31 @@ async def save_price_batch(
 
 
 async def log_discovery_event(
-    explorer: str,
-    discovered: List[str],
-    discovery_type: str = "bfs",
-    source: str = "auto",
-    depth: int = 0
+    source: str,
+    found: List[str],
+    method: str = "bfs",
+    market: str = "us"
 ) -> bool:
     """Log a discovery event
 
     Args:
-        explorer: Source company symbol
-        discovered: List of discovered symbols
-        discovery_type: Type of discovery (bfs, peers, etf, etc.)
-        source: Data source (e.g., openbb, akshare)
-        depth: Discovery depth in BFS traversal
+        source: Source company symbol
+        found: List of discovered symbols
+        method: Discovery method (bfs, peers, etf, etc.)
+        market: Market type
 
     Returns:
         True if successful
     """
     try:
         async with PostgresClient() as db:
-            for symbol in discovered:
+            for symbol in found:
                 await db.log_discovery(
-                    explorer=explorer,
+                    explorer=source,
                     discovered=symbol,
-                    relation_type=discovery_type,
-                    source=source,
-                    depth=depth
+                    relation_type=method,
+                    source=market,
+                    depth=0
                 )
             return True
     except Exception as e:
@@ -68,38 +66,33 @@ async def log_discovery_event(
 
 async def log_impact_analysis(
     event: str,
-    affected_ticker: str,
-    source_ticker: str,
-    impact_score: float,
-    direction: str,
-    confidence: float,
-    reasoning: str
+    affected_companies: List[str],
+    impact_score: float = 0.5,
+    confidence: float = 0.8
 ) -> bool:
     """Log an impact analysis result
 
     Args:
         event: Event description
-        affected_ticker: Affected company ticker
-        source_ticker: Source/origin company ticker
-        impact_score: Numerical impact score
-        direction: Impact direction (利好/利空/中性)
+        affected_companies: List of affected company tickers
+        impact_score: Numerical impact score (0-1)
         confidence: Confidence level (0-1)
-        reasoning: Analysis reasoning
 
     Returns:
         True if successful
     """
     try:
         async with PostgresClient() as db:
-            await db.log_impact(
-                event=event,
-                source=source_ticker,
-                affected=affected_ticker,
-                direction=direction,
-                magnitude=_score_to_magnitude(impact_score),
-                reasoning=reasoning,
-                confidence=confidence
-            )
+            for ticker in affected_companies:
+                await db.log_impact(
+                    event=event,
+                    source="analysis",
+                    affected=ticker,
+                    direction="中性" if impact_score == 0.5 else ("利好" if impact_score > 0.5 else "利空"),
+                    magnitude=_score_to_magnitude(abs(impact_score - 0.5) * 2),
+                    reasoning=f"Automated analysis for event: {event[:50]}...",
+                    confidence=confidence
+                )
             return True
     except Exception as e:
         logger.error(f"log_impact_analysis failed: {e}")
@@ -117,31 +110,41 @@ def _score_to_magnitude(score: float) -> str:
 
 async def get_price_history(
     ticker: str,
-    start_date: str,
-    end_date: str,
-    market: str = "us"
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    market: str = "us",
+    limit: int = 1000
 ) -> List[Dict[str, Any]]:
     """Get price history for a symbol
 
     Args:
         ticker: Stock symbol
-        start_date: Start date (YYYY-MM-DD)
-        end_date: End date (YYYY-MM-DD)
+        start_date: Start date (YYYY-MM-DD), defaults to 30 days ago
+        end_date: End date (YYYY-MM-DD), defaults to today
         market: Market type
+        limit: Maximum rows to return
 
     Returns:
         List of price records
     """
     try:
+        if not start_date:
+            from datetime import datetime, timedelta
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            from datetime import datetime
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
         async with PostgresClient() as db:
             rows = await db.fetch(
                 """
                 SELECT date, open, high, low, close, volume
                 FROM stock_prices
                 WHERE symbol = $1 AND market = $2 AND date BETWEEN $3 AND $4
-                ORDER BY date ASC
+                ORDER BY date DESC
+                LIMIT $5
                 """,
-                ticker, market, start_date, end_date
+                ticker, market, start_date, end_date, limit
             )
             return [dict(row) for row in rows]
     except Exception as e:
@@ -151,38 +154,45 @@ async def get_price_history(
 
 async def get_discovery_history(
     source: Optional[str] = None,
-    days: int = 7
+    method: Optional[str] = None,
+    limit: int = 100
 ) -> List[Dict[str, Any]]:
     """Get discovery history
 
     Args:
         source: Optional source filter
-        days: Number of days to look back
+        method: Optional method filter
+        limit: Maximum rows to return
 
     Returns:
         List of discovery log entries
     """
     try:
         async with PostgresClient() as db:
+            conditions = ["1=1"]
+            params = []
+            param_idx = 1
+
             if source:
-                rows = await db.fetch(
-                    """
-                    SELECT explorer_ticker, discovered_ticker, relation_type, source, depth, discovered_at
-                    FROM discovery_log
-                    WHERE explorer_ticker = $1 AND discovered_at > NOW() - INTERVAL '%s days'
-                    ORDER BY discovered_at DESC
-                    """ % days,
-                    source
-                )
-            else:
-                rows = await db.fetch(
-                    """
-                    SELECT explorer_ticker, discovered_ticker, relation_type, source, depth, discovered_at
-                    FROM discovery_log
-                    WHERE discovered_at > NOW() - INTERVAL '%s days'
-                    ORDER BY discovered_at DESC
-                    """ % days
-                )
+                conditions.append(f"explorer_ticker = ${param_idx}")
+                params.append(source)
+                param_idx += 1
+
+            if method:
+                conditions.append(f"relation_type = ${param_idx}")
+                params.append(method)
+                param_idx += 1
+
+            query = f"""
+                SELECT explorer_ticker, discovered_ticker, relation_type, source, depth, discovered_at
+                FROM discovery_log
+                WHERE {' AND '.join(conditions)}
+                ORDER BY discovered_at DESC
+                LIMIT ${param_idx}
+            """
+            params.append(limit)
+
+            rows = await db.fetch(query, *params)
             return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"get_discovery_history failed: {e}")
@@ -190,45 +200,43 @@ async def get_discovery_history(
 
 
 async def get_impact_history(
-    ticker: Optional[str] = None,
-    event: Optional[str] = None,
-    days: int = 30
+    event_keyword: Optional[str] = None,
+    limit: int = 100
 ) -> List[Dict[str, Any]]:
     """Get impact analysis history
 
     Args:
-        ticker: Optional ticker filter
-        event: Optional event filter
-        days: Number of days to look back
+        event_keyword: Optional event keyword filter
+        limit: Maximum rows to return
 
     Returns:
         List of impact log entries
     """
     try:
         async with PostgresClient() as db:
-            conditions = ["analyzed_at > NOW() - INTERVAL '%s days'" % days]
-            params = []
-            param_idx = 1
-
-            if ticker:
-                conditions.append(f"affected_ticker = ${param_idx}")
-                params.append(ticker)
-                param_idx += 1
-
-            if event:
-                conditions.append(f"event_description ILIKE ${param_idx}")
-                params.append(f"%{event}%")
-                param_idx += 1
-
-            query = f"""
-                SELECT event_description, source_ticker, affected_ticker,
-                       direction, magnitude, reasoning, confidence, analyzed_at
-                FROM event_impact_log
-                WHERE {' AND '.join(conditions)}
-                ORDER BY analyzed_at DESC
-            """
-
-            rows = await db.fetch(query, *params)
+            if event_keyword:
+                rows = await db.fetch(
+                    """
+                    SELECT event_description, source_ticker, affected_ticker,
+                           direction, magnitude, reasoning, confidence, analyzed_at
+                    FROM event_impact_log
+                    WHERE event_description ILIKE $1
+                    ORDER BY analyzed_at DESC
+                    LIMIT $2
+                    """,
+                    f"%{event_keyword}%", limit
+                )
+            else:
+                rows = await db.fetch(
+                    """
+                    SELECT event_description, source_ticker, affected_ticker,
+                           direction, magnitude, reasoning, confidence, analyzed_at
+                    FROM event_impact_log
+                    ORDER BY analyzed_at DESC
+                    LIMIT $1
+                    """,
+                    limit
+                )
             return [dict(row) for row in rows]
     except Exception as e:
         logger.error(f"get_impact_history failed: {e}")

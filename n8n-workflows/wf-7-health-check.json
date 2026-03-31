@@ -1,0 +1,126 @@
+{
+  "name": "WF-7: Health Check",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Hourly Health Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "check_api",
+      "name": "Check Data API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 200],
+      "parameters": {
+        "method": "GET",
+        "url": "http://data-api:8000/health",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "check_neo4j",
+      "name": "Check Neo4j",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_graph_stats",
+        "body": {},
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "aggregate_status",
+      "name": "Aggregate Status",
+      "type": "n8n-nodes-base.function",
+      "position": [650, 300],
+      "parameters": {
+        "functionCode": "const apiStatus = $input.all()[0].json;\nconst neo4jStatus = $input.all()[1].json;\n\nconst allHealthy = apiStatus.status === 'healthy' && neo4jStatus;\n\nreturn [{\n  json: {\n    timestamp: new Date().toISOString(),\n    overall: allHealthy ? 'healthy' : 'degraded',\n    services: {\n      data_api: apiStatus.status || 'unknown',\n      neo4j: neo4jStatus ? 'healthy' : 'unhealthy',\n      tools_available: apiStatus.tools_available || 0\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "check_status",
+      "name": "Check Overall Status",
+      "type": "n8n-nodes-base.if",
+      "position": [850, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.overall }}",
+              "value2": "healthy",
+              "operation": "notEqual"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "send_alert",
+      "name": "Send Health Alert",
+      "type": "n8n-nodes-base.slack",
+      "position": [1050, 400],
+      "parameters": {
+        "channel": "#system-alerts",
+        "text": "⚠️ System Health Alert: Status is {{ $json.overall }}\nData API: {{ $json.services.data_api }}\nNeo4j: {{ $json.services.neo4j }}\nTime: {{ $json.timestamp }}"
+      }
+    },
+    {
+      "id": "log_health",
+      "name": "Log Health Check",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1050, 200],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO health_checks (status, details, check_time) VALUES ($1, $2, NOW())",
+        "parameters": "={{ [$json.overall, JSON.stringify($json.services)] }}"
+      }
+    }
+  ],
+  "connections": {
+    "Hourly Health Check": {
+      "main": [
+        [{"node": "Check Data API", "type": "main", "index": 0}],
+        [{"node": "Check Neo4j", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Data API": {
+      "main": [[{"node": "Aggregate Status", "type": "main", "index": 0}]]
+    },
+    "Check Neo4j": {
+      "main": [[{"node": "Aggregate Status", "type": "main", "index": 0}]]
+    },
+    "Aggregate Status": {
+      "main": [[{"node": "Check Overall Status", "type": "main", "index": 0}]]
+    },
+    "Check Overall Status": {
+      "main": [
+        [{"node": "Send Health Alert", "type": "main", "index": 0}],
+        [{"node": "Log Health Check", "type": "main", "index": 0}]
+      ]
+    },
+    "Send Health Alert": {
+      "main": [[{"node": "Log Health Check", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["health", "monitoring", "system"]
+}

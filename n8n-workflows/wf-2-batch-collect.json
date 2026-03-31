@@ -1,0 +1,96 @@
+{
+  "name": "WF-2: Batch Data Collection",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Daily Market Close",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 21 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_symbols",
+      "name": "Get Graph Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_graph_stats",
+        "body": {}
+      }
+    },
+    {
+      "id": "extract_symbols",
+      "name": "Extract Symbols",
+      "type": "n8n-nodes-base.function",
+      "position": [650, 300],
+      "parameters": {
+        "functionCode": "// Get all companies from graph\nconst stats = $input.all()[0].json;\nconst symbols = stats.companies || ['NVDA', 'AAPL', 'MSFT', 'AMD', 'INTC'];\n\n// Split into batches of 10\nconst batches = [];\nfor (let i = 0; i < symbols.length; i += 10) {\n  batches.push(symbols.slice(i, i + 10));\n}\n\nreturn batches.map((batch, idx) => ({\n  json: {\n    symbols: batch,\n    batch_index: idx,\n    total_batches: batches.length\n  }\n}));"
+      }
+    },
+    {
+      "id": "batch_collect",
+      "name": "Batch Collect Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/batch_collect",
+        "body": {
+          "symbols": "={{ $json.symbols }}",
+          "market": "us",
+          "include_profile": true,
+          "include_price": true,
+          "price_start": "={{ new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] }}",
+          "price_end": "={{ new Date().toISOString().split('T')[0] }}"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "save_prices",
+      "name": "Save Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/save_price_batch",
+        "body": {
+          "ticker": "={{ $json.results[0].symbol }}",
+          "market": "us",
+          "prices": "={{ $json.results[0].prices }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Market Close": {
+      "main": [[{"node": "Get Graph Stats", "type": "main", "index": 0}]]
+    },
+    "Get Graph Stats": {
+      "main": [[{"node": "Extract Symbols", "type": "main", "index": 0}]]
+    },
+    "Extract Symbols": {
+      "main": [[{"node": "Batch Collect Data", "type": "main", "index": 0}]]
+    },
+    "Batch Collect Data": {
+      "main": [[{"node": "Save Prices", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["collection", "data", "scheduled"]
+}

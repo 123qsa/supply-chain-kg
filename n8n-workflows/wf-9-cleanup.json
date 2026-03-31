@@ -1,0 +1,121 @@
+{
+  "name": "WF-9: Data Cleanup",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Monthly Cleanup",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 1 * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cleanup_config",
+      "name": "Cleanup Config",
+      "type": "n8n-nodes-base.set",
+      "position": [450, 300],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "retention_days",
+              "value": "90"
+            },
+            {
+              "name": "archive_old",
+              "value": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cleanup_old_prices",
+      "name": "Cleanup Old Prices",
+      "type": "n8n-nodes-base.postgres",
+      "position": [650, 200],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM prices WHERE time < NOW() - INTERVAL '90 days' AND ticker NOT IN (SELECT DISTINCT ticker FROM prices WHERE time > NOW() - INTERVAL '30 days')",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "cleanup_old_logs",
+      "name": "Cleanup Old Logs",
+      "type": "n8n-nodes-base.postgres",
+      "position": [650, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM discovery_log WHERE created_at < NOW() - INTERVAL '90 days'",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "vacuum_tables",
+      "name": "Optimize Tables",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "VACUUM ANALYZE prices, discovery_log, impact_log",
+        "options": {
+          "timeout": 600000
+        }
+      }
+    },
+    {
+      "id": "log_cleanup",
+      "name": "Log Cleanup Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_discovery_event",
+        "body": {
+          "source": "cleanup",
+          "found": "[\"monthly_cleanup_completed\"]",
+          "method": "cleanup",
+          "market": "us"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monthly Cleanup": {
+      "main": [[{"node": "Cleanup Config", "type": "main", "index": 0}]]
+    },
+    "Cleanup Config": {
+      "main": [
+        [{"node": "Cleanup Old Prices", "type": "main", "index": 0}],
+        [{"node": "Cleanup Old Logs", "type": "main", "index": 0}]
+      ]
+    },
+    "Cleanup Old Prices": {
+      "main": [[{"node": "Optimize Tables", "type": "main", "index": 0}]]
+    },
+    "Cleanup Old Logs": {
+      "main": [[{"node": "Optimize Tables", "type": "main", "index": 0}]]
+    },
+    "Optimize Tables": {
+      "main": [[{"node": "Log Cleanup Event", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["cleanup", "maintenance", "monthly"]
+}

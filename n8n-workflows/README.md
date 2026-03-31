@@ -2,6 +2,21 @@
 
 This directory contains n8n workflow configurations for the supply chain knowledge graph system.
 
+## Workflow Files
+
+| File | Workflow | Description |
+|------|----------|-------------|
+| [wf-0-seed.json](wf-0-seed.json) | WF-0 | Seed initialization with NVDA |
+| [wf-1-bfs-crawler.json](wf-1-bfs-crawler.json) | WF-1 | BFS discovery crawler (runs every 6 hours) |
+| [wf-2-batch-collect.json](wf-2-batch-collect.json) | WF-2 | Batch data collection (daily at 21:00) |
+| [wf-3-event-impact.json](wf-3-event-impact.json) | WF-3 | Event impact analysis webhook |
+| [wf-4-price-alert.json](wf-4-price-alert.json) | WF-4 | Price alert monitor (hourly) |
+| [wf-5-graph-analytics.json](wf-5-graph-analytics.json) | WF-5 | Graph analytics (weekly) |
+| [wf-6-weekly-report.json](wf-6-weekly-report.json) | WF-6 | Weekly report generation |
+| [wf-7-health-check.json](wf-7-health-check.json) | WF-7 | System health monitoring (hourly) |
+| [wf-8-data-sync.json](wf-8-data-sync.json) | WF-8 | Daily data synchronization |
+| [wf-9-cleanup.json](wf-9-cleanup.json) | WF-9 | Monthly data cleanup |
+
 ## Overview
 
 The system uses n8n for workflow orchestration with 10 main workflows:
@@ -123,10 +138,32 @@ Required in n8n:
 
 ## Importing Workflows
 
-```bash
-# Import all workflows
-n8n import:workflow --input=./workflows/
+### Via n8n UI
 
-# Or import individually via UI
-# Settings > Workflows > Import
+1. Open n8n at http://localhost:5678
+2. Go to **Workflows** → **Import from File**
+3. Select one of the JSON files from this directory:
+   - Start with `wf-0-seed.json` to initialize the graph
+   - Then import `wf-1-bfs-crawler.json` for automated discovery
+   - Import `wf-3-event-impact.json` for event analysis
+
+### Via CLI (requires n8n CLI)
+
+```bash
+# Import a single workflow
+n8n import:workflow --input=./n8n-workflows/wf-0-seed.json
+
+# Import all workflows
+for f in n8n-workflows/wf-*.json; do
+  n8n import:workflow --input="$f"
+done
+```
+
+### Automated Setup Script
+
+```bash
+# Run the setup script to import all workflows
+curl -X POST http://localhost:5678/api/v1/workflows \
+  -H "Content-Type: application/json" \
+  -d @n8n-workflows/wf-0-seed.json
 ```

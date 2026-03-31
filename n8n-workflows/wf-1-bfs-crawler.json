@@ -1,0 +1,148 @@
+{
+  "name": "WF-1: BFS Discovery",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bfs_config",
+      "name": "BFS Config",
+      "type": "n8n-nodes-base.set",
+      "position": [450, 300],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "start_symbol",
+              "value": "NVDA"
+            },
+            {
+              "name": "market",
+              "value": "us"
+            },
+            {
+              "name": "max_depth",
+              "value": "2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bfs_discovery",
+      "name": "BFS Discovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/bfs_discovery",
+        "body": {
+          "start_symbol": "={{ $json.start_symbol }}",
+          "market": "={{ $json.market }}",
+          "max_depth": "={{ $json.max_depth }}"
+        },
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "process_results",
+      "name": "Process Results",
+      "type": "n8n-nodes-base.function",
+      "position": [850, 300],
+      "parameters": {
+        "functionCode": "const results = $input.all()[0].json;\nconst companies = results.companies || [];\nconst relationships = results.relationships || [];\n\nreturn [{\n  json: {\n    companies: companies,\n    relationships: relationships,\n    discovered_count: companies.length,\n    relationship_count: relationships.length\n  }\n}];"
+      }
+    },
+    {
+      "id": "batch_upsert_companies",
+      "name": "Batch Upsert Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/batch_upsert_companies",
+        "body": {
+          "companies": "={{ $json.companies }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "batch_upsert_relationships",
+      "name": "Batch Upsert Relationships",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/batch_upsert_relationships",
+        "body": {
+          "relationships": "={{ $json.relationships }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "log_discovery",
+      "name": "Log Discovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_discovery_event",
+        "body": {
+          "source": "NVDA",
+          "found": "={{ JSON.stringify($json.companies.map(c => c.ticker)) }}",
+          "method": "bfs_discovery",
+          "market": "us"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{"node": "BFS Config", "type": "main", "index": 0}]]
+    },
+    "BFS Config": {
+      "main": [[{"node": "BFS Discovery", "type": "main", "index": 0}]]
+    },
+    "BFS Discovery": {
+      "main": [[{"node": "Process Results", "type": "main", "index": 0}]]
+    },
+    "Process Results": {
+      "main": [
+        [{"node": "Batch Upsert Companies", "type": "main", "index": 0}],
+        [{"node": "Batch Upsert Relationships", "type": "main", "index": 0}]
+      ]
+    },
+    "Batch Upsert Companies": {
+      "main": [[{"node": "Log Discovery", "type": "main", "index": 0}]]
+    },
+    "Batch Upsert Relationships": {
+      "main": [[{"node": "Log Discovery", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["discovery", "bfs", "scheduled"]
+}

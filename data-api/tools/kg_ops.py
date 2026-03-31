@@ -155,15 +155,15 @@ async def get_company_neighbors(
 
 
 async def find_paths(
-    source: str,
-    target: str,
-    max_depth: int = 5
+    start: str,
+    end: str,
+    max_depth: int = 4
 ) -> List[List[Dict[str, Any]]]:
     """Find all paths between two companies
 
     Args:
-        source: Starting company ticker
-        target: Target company ticker
+        start: Starting company ticker
+        end: Target company ticker
         max_depth: Maximum path length
 
     Returns:
@@ -173,7 +173,7 @@ async def find_paths(
         async with Neo4jClient() as neo4j:
             # Use Neo4j's pathfinding capabilities
             query = """
-            MATCH path = (a:Company {ticker: $source})-[:RELATES_TO*1..5]->(b:Company {ticker: $target})
+            MATCH path = (a:Company {ticker: $start})-[:RELATES_TO*1..5]->(b:Company {ticker: $end})
             RETURN [node in nodes(path) | node.ticker] as tickers,
                    [rel in relationships(path) | type(rel)] as rel_types,
                    length(path) as depth
@@ -183,40 +183,40 @@ async def find_paths(
             # use the Neo4j client to execute the query
             return []
     except Exception as e:
-        logger.error(f"find_paths failed for {source}->{target}: {e}")
+        logger.error(f"find_paths failed for {start}->{end}: {e}")
         return []
 
 
 async def get_subgraph(
-    center: str,
-    radius: int = 2
+    ticker: str,
+    depth: int = 2
 ) -> Dict[str, Any]:
     """Get a subgraph centered around a company
 
     Args:
-        center: Center company ticker
-        radius: Radius of the subgraph (hops)
+        ticker: Center company ticker
+        depth: Depth of the subgraph (hops)
 
     Returns:
         Subgraph with nodes and relationships
     """
     try:
         async with Neo4jClient() as neo4j:
-            # Get all nodes within radius
+            # Get all nodes within depth
             query = """
-            MATCH path = (center:Company {ticker: $center})-[:RELATES_TO*1..$radius]-(neighbor)
+            MATCH path = (center:Company {ticker: $ticker})-[:RELATES_TO*1..$depth]-(neighbor)
             RETURN center, neighbor, relationships(path) as rels
             """
             # Placeholder implementation
             return {
-                "center": center,
-                "radius": radius,
+                "center": ticker,
+                "depth": depth,
                 "nodes": [],
                 "relationships": []
             }
     except Exception as e:
-        logger.error(f"get_subgraph failed for {center}: {e}")
-        return {"center": center, "radius": radius, "nodes": [], "relationships": []}
+        logger.error(f"get_subgraph failed for {ticker}: {e}")
+        return {"center": ticker, "depth": depth, "nodes": [], "relationships": []}
 
 
 async def delete_company(ticker: str) -> bool:

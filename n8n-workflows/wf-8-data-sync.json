@@ -1,0 +1,110 @@
+{
+  "name": "WF-8: Data Sync",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Daily Data Sync",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_companies",
+      "name": "Get All Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/get_graph_stats",
+        "body": {}
+      }
+    },
+    {
+      "id": "sync_profiles",
+      "name": "Sync Company Profiles",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/batch_collect",
+        "body": {
+          "symbols": ["NVDA", "AMD", "INTC"],
+          "market": "us",
+          "include_profile": true,
+          "include_price": false
+        },
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "sync_prices",
+      "name": "Sync Price Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/batch_collect",
+        "body": {
+          "symbols": ["NVDA", "AMD", "INTC"],
+          "market": "us",
+          "include_profile": false,
+          "include_price": true,
+          "price_start": "={{ new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] }}",
+          "price_end": "={{ new Date().toISOString().split('T')[0] }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "log_sync",
+      "name": "Log Sync Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_discovery_event",
+        "body": {
+          "source": "sync",
+          "found": "[\"daily_sync_completed\"]",
+          "method": "data_sync",
+          "market": "us"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Data Sync": {
+      "main": [[{"node": "Get All Companies", "type": "main", "index": 0}]]
+    },
+    "Get All Companies": {
+      "main": [
+        [{"node": "Sync Company Profiles", "type": "main", "index": 0}],
+        [{"node": "Sync Price Data", "type": "main", "index": 0}]
+      ]
+    },
+    "Sync Company Profiles": {
+      "main": [[{"node": "Log Sync Event", "type": "main", "index": 0}]]
+    },
+    "Sync Price Data": {
+      "main": [[{"node": "Log Sync Event", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["sync", "data", "daily"]
+}

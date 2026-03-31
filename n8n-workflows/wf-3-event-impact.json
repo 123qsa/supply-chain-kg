@@ -1,0 +1,132 @@
+{
+  "name": "WF-3: Event Impact Analysis",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Event Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "event-impact",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "validate_event",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.if",
+      "position": [450, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.event }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "analyze_impact",
+      "name": "Analyze Supply Chain Impact",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/analyze_supply_chain_impact",
+        "body": {
+          "event": "={{ $json.body.event }}",
+          "start_symbol": "={{ $json.body.start_symbol || 'NVDA' }}",
+          "max_depth": "={{ $json.body.max_depth || 2 }}"
+        },
+        "options": {
+          "timeout": 180000
+        }
+      }
+    },
+    {
+      "id": "generate_summary",
+      "name": "Generate Impact Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/generate_impact_summary",
+        "body": {
+          "analysis_results": "={{ $json.analysis_results }}",
+          "event": "={{ $json.event }}"
+        }
+      }
+    },
+    {
+      "id": "log_impact",
+      "name": "Log Impact Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://data-api:8000/mcp/call/log_impact_analysis",
+        "body": {
+          "event": "={{ $json.event }}",
+          "affected_companies": "={{ JSON.stringify($json.analysis_results.map(r => r.ticker)) }}",
+          "impact_score": "={{ $json.analysis_results[0]?.impact_score || 0 }}",
+          "confidence": "={{ $json.analysis_results[0]?.confidence || 0 }}"
+        }
+      }
+    },
+    {
+      "id": "error_response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [650, 400],
+      "parameters": {
+        "statusCode": 400,
+        "body": {
+          "error": "Event description is required"
+        }
+      }
+    },
+    {
+      "id": "success_response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1250, 300],
+      "parameters": {
+        "statusCode": 200,
+        "body": {
+          "status": "success",
+          "event": "={{ $json.event }}",
+          "summary": "={{ $json.summary }}",
+          "affected_count": "={{ $json.analysis_results.length }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Event Webhook": {
+      "main": [[{"node": "Validate Event", "type": "main", "index": 0}]]
+    },
+    "Validate Event": {
+      "main": [
+        [{"node": "Analyze Supply Chain Impact", "type": "main", "index": 0}],
+        [{"node": "Error Response", "type": "main", "index": 0}]
+      ]
+    },
+    "Analyze Supply Chain Impact": {
+      "main": [[{"node": "Generate Impact Summary", "type": "main", "index": 0}]]
+    },
+    "Generate Impact Summary": {
+      "main": [[{"node": "Log Impact Analysis", "type": "main", "index": 0}]]
+    },
+    "Log Impact Analysis": {
+      "main": [[{"node": "Success Response", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["impact", "analysis", "webhook"]
+}

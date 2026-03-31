@@ -179,6 +179,7 @@ curl -X POST http://localhost:8000/mcp/call/bfs_discovery \
 | `get_company_neighbors` | Get related companies |
 | `find_paths` | Find paths between companies |
 | `get_subgraph` | Extract subgraph |
+| `delete_company` | Delete company node |
 | `get_graph_stats` | Graph statistics |
 
 ### Database Tools
@@ -296,6 +297,10 @@ python -m pytest tests/ -v
 
 # Run specific test
 python -m pytest tests/test_discover.py -v
+
+# Test MCP tools
+cd ..
+python scripts/test-mcp-tools.py
 ```
 
 ## Troubleshooting
