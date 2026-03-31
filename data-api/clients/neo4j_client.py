@@ -111,23 +111,43 @@ class Neo4jClient:
 
     @classmethod
     async def create_relation(cls, from_ticker: str, to_ticker: str,
-                              rel_type: str, source: str, confidence: float = 1.0) -> bool:
-        """Create a relationship between two companies"""
+                              rel_type: str, properties: Dict[str, Any] = None) -> bool:
+        """Create a relationship between two companies
+
+        Args:
+            from_ticker: Source company ticker
+            to_ticker: Target company ticker
+            rel_type: Relationship type (e.g., COMPETES_WITH, PARTNERS_WITH)
+            properties: Additional relationship properties (source, confidence, etc.)
+
+        Returns:
+            True if successful
+        """
+        props = properties or {}
+
+        # Build dynamic SET clause for additional properties
+        set_clauses = ["r.updatedAt = datetime()"]
+        for key, value in props.items():
+            if key not in ['from_ticker', 'to_ticker', 'rel_type']:
+                set_clauses.append(f"r.{key} = ${key}")
+
+        set_clause = ", ".join(set_clauses)
+
         query = f"""
         MATCH (a:Company {{ticker: $from_ticker}})
         MATCH (b:Company {{ticker: $to_ticker}})
         MERGE (a)-[r:{rel_type}]->(b)
-        SET r.source = $source,
-            r.confidence = $confidence,
-            r.updatedAt = datetime()
+        SET {set_clause}
         RETURN r
         """
-        result = await cls.run_query(query, {
+
+        params = {
             "from_ticker": from_ticker,
             "to_ticker": to_ticker,
-            "source": source,
-            "confidence": confidence
-        })
+            **props
+        }
+
+        result = await cls.run_query(query, params)
         return len(result) > 0
 
     @classmethod

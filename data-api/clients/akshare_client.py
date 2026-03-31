@@ -9,6 +9,18 @@ logger = logging.getLogger(__name__)
 class AkShareClient:
     """AkShare data source client for A-share markets"""
 
+    def __init__(self):
+        """Initialize AkShare client"""
+        pass
+
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        return False
+
     def discover_cn_concept(self, board_name: str) -> List[Dict[str, Any]]:
         """Discover companies in a concept board"""
         try:

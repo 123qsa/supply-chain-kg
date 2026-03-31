@@ -15,6 +15,14 @@ class OpenBBClient:
         if settings.openbb_pat:
             obb.account.login(pat=settings.openbb_pat)
 
+    async def __aenter__(self):
+        """Async context manager entry"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        return False
+
     def discover_peers(self, symbol: str, provider: str = "yfinance") -> List[Dict[str, Any]]:
         """Discover competitor companies"""
         try:

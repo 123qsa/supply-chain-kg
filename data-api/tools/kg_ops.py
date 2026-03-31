@@ -84,7 +84,12 @@ async def batch_upsert_companies(
     async with Neo4jClient() as neo4j:
         for company in companies:
             try:
-                await neo4j.create_company(company)
+                await neo4j.create_company(
+                    ticker=company.get("ticker"),
+                    name=company.get("name"),
+                    market=company.get("market", "us"),
+                    depth=company.get("depth", 0)
+                )
                 results["success"] += 1
             except Exception as e:
                 results["failed"] += 1
@@ -103,7 +108,7 @@ async def batch_upsert_relationships(
 
     Args:
         relationships: List of relationship dictionaries with
-                      source, target, type, and optional properties
+                      source, target, relation_type, and optional properties
 
     Returns:
         Results summary with success/failure counts
@@ -116,7 +121,7 @@ async def batch_upsert_relationships(
                 await neo4j.create_relation(
                     rel["source"],
                     rel["target"],
-                    rel["type"],
+                    rel["relation_type"],
                     rel.get("properties", {})
                 )
                 results["success"] += 1
@@ -147,7 +152,15 @@ async def get_company_neighbors(
     """
     try:
         async with Neo4jClient() as neo4j:
-            neighbors = await neo4j.get_related_companies(ticker, relation_types)
+            neighbors = await neo4j.get_related_companies(ticker, max_depth)
+
+            # Filter by relation types if specified
+            if relation_types:
+                neighbors = [
+                    n for n in neighbors
+                    if n.get("relation_type") in relation_types
+                ]
+
             return neighbors
     except Exception as e:
         logger.error(f"get_company_neighbors failed for {ticker}: {e}")
@@ -158,7 +171,7 @@ async def find_paths(
     start: str,
     end: str,
     max_depth: int = 4
-) -> List[List[Dict[str, Any]]]:
+) -> List[Dict[str, Any]]:
     """Find all paths between two companies
 
     Args:
@@ -167,21 +180,31 @@ async def find_paths(
         max_depth: Maximum path length
 
     Returns:
-        List of paths, where each path is a list of relationship steps
+        List of paths with nodes and relationships
     """
     try:
         async with Neo4jClient() as neo4j:
-            # Use Neo4j's pathfinding capabilities
+            # Query to find all paths between two companies
             query = """
-            MATCH path = (a:Company {ticker: $start})-[:RELATES_TO*1..5]->(b:Company {ticker: $end})
-            RETURN [node in nodes(path) | node.ticker] as tickers,
-                   [rel in relationships(path) | type(rel)] as rel_types,
-                   length(path) as depth
+            MATCH path = (start:Company {ticker: $start})-[:COMPETES_WITH|PARTNERS_WITH|SUPPLIES_TO|CUSTOMER_OF|INVESTED_IN|DEPENDS_ON*1..%d]->(end:Company {ticker: $end})
+            RETURN
+                [node in nodes(path) | {ticker: node.ticker, name: node.name}] as nodes,
+                [rel in relationships(path) | {type: type(rel), source: startNode(rel).ticker, target: endNode(rel).ticker}] as relationships,
+                length(path) as depth
             LIMIT 10
-            """
-            # This is a placeholder - actual implementation would
-            # use the Neo4j client to execute the query
-            return []
+            """ % max_depth
+
+            results = await neo4j.run_query(query, {"start": start, "end": end})
+
+            paths = []
+            for record in results:
+                paths.append({
+                    "nodes": record.get("nodes", []),
+                    "relationships": record.get("relationships", []),
+                    "depth": record.get("depth", 0)
+                })
+
+            return paths
     except Exception as e:
         logger.error(f"find_paths failed for {start}->{end}: {e}")
         return []
@@ -202,21 +225,49 @@ async def get_subgraph(
     """
     try:
         async with Neo4jClient() as neo4j:
-            # Get all nodes within depth
-            query = """
-            MATCH path = (center:Company {ticker: $ticker})-[:RELATES_TO*1..$depth]-(neighbor)
-            RETURN center, neighbor, relationships(path) as rels
+            # Get center node
+            center_query = """
+            MATCH (c:Company {ticker: $ticker})
+            RETURN {ticker: c.ticker, name: c.name, market: c.market, sector: c.sector} as center
             """
-            # Placeholder implementation
+            center_result = await neo4j.run_query(center_query, {"ticker": ticker})
+
+            if not center_result:
+                return {"center": ticker, "depth": depth, "nodes": [], "relationships": []}
+
+            center_node = center_result[0].get("center", {})
+
+            # Get all nodes and relationships within depth
+            subgraph_query = """
+            MATCH path = (center:Company {ticker: $ticker})-[:COMPETES_WITH|PARTNERS_WITH|SUPPLIES_TO|CUSTOMER_OF|INVESTED_IN|DEPENDS_ON*1..%d]-(neighbor)
+            WHERE center <> neighbor
+            WITH DISTINCT neighbor,
+                 [rel in relationships(path) | type(rel)][0] as rel_type,
+                 length(path) as hops
+            RETURN
+                collect(DISTINCT {ticker: neighbor.ticker, name: neighbor.name, market: neighbor.market, sector: neighbor.sector, hops: hops}) as nodes,
+                collect(DISTINCT {source: $ticker, target: neighbor.ticker, type: rel_type}) as relationships
+            """ % depth
+
+            subgraph_result = await neo4j.run_query(subgraph_query, {"ticker": ticker})
+
+            if subgraph_result:
+                return {
+                    "center": center_node,
+                    "depth": depth,
+                    "nodes": subgraph_result[0].get("nodes", []),
+                    "relationships": subgraph_result[0].get("relationships", [])
+                }
+
             return {
-                "center": ticker,
+                "center": center_node,
                 "depth": depth,
                 "nodes": [],
                 "relationships": []
             }
     except Exception as e:
         logger.error(f"get_subgraph failed for {ticker}: {e}")
-        return {"center": ticker, "depth": depth, "nodes": [], "relationships": []}
+        return {"center": {"ticker": ticker}, "depth": depth, "nodes": [], "relationships": []}
 
 
 async def delete_company(ticker: str) -> bool:
@@ -234,7 +285,7 @@ async def delete_company(ticker: str) -> bool:
             MATCH (c:Company {ticker: $ticker})
             DETACH DELETE c
             """
-            # Placeholder - would execute via neo4j client
+            await neo4j.run_query(query, {"ticker": ticker})
             return True
     except Exception as e:
         logger.error(f"delete_company failed for {ticker}: {e}")
@@ -270,6 +321,7 @@ async def merge_duplicate_companies(
             WITH c1, c2
             DETACH DELETE c1
             """
+            await neo4j.run_query(query, {"ticker1": ticker1, "ticker2": ticker2})
             return True
     except Exception as e:
         logger.error(f"merge_duplicate_companies failed: {e}")
@@ -284,19 +336,59 @@ async def get_graph_stats() -> Dict[str, Any]:
     """
     try:
         async with Neo4jClient() as neo4j:
-            stats = {
-                "node_count": 0,
-                "edge_count": 0,
-                "relation_types": [],
-                "market_distribution": {}
+            # Node count
+            node_count_result = await neo4j.run_query(
+                "MATCH (n:Company) RETURN count(n) as node_count"
+            )
+            node_count = node_count_result[0].get("node_count", 0) if node_count_result else 0
+
+            # Edge count
+            edge_count_result = await neo4j.run_query(
+                "MATCH ()-[r]->() RETURN count(r) as edge_count"
+            )
+            edge_count = edge_count_result[0].get("edge_count", 0) if edge_count_result else 0
+
+            # Relation types
+            rel_types_result = await neo4j.run_query(
+                "MATCH ()-[r]->() RETURN distinct type(r) as type"
+            )
+            relation_types = [r.get("type") for r in rel_types_result]
+
+            # Market distribution
+            market_result = await neo4j.run_query(
+                """
+                MATCH (c:Company)
+                RETURN c.market as market, count(c) as count
+                """
+            )
+            market_distribution = {
+                r.get("market", "unknown"): r.get("count", 0)
+                for r in market_result
             }
 
-            # These would be actual Neo4j queries
-            # MATCH (n:Company) RETURN count(n) as node_count
-            # MATCH ()-[r]->() RETURN count(r) as edge_count
-            # MATCH ()-[r]->() RETURN distinct type(r) as types
+            # Sector distribution
+            sector_result = await neo4j.run_query(
+                """
+                MATCH (c:Company)
+                WHERE c.sector IS NOT NULL
+                RETURN c.sector as sector, count(c) as count
+                LIMIT 10
+                """
+            )
+            sector_distribution = {
+                r.get("sector", "unknown"): r.get("count", 0)
+                for r in sector_result
+            }
 
-            return stats
+            return {
+                "node_count": node_count,
+                "edge_count": edge_count,
+                "relation_types": relation_types,
+                "market_distribution": market_distribution,
+                "sector_distribution": sector_distribution,
+                "avg_degree": (edge_count * 2 / node_count) if node_count > 0 else 0,
+                "density": (edge_count / (node_count * (node_count - 1))) if node_count > 1 else 0
+            }
     except Exception as e:
         logger.error(f"get_graph_stats failed: {e}")
         return {"error": str(e)}
