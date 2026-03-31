@@ -34,7 +34,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENBB_PAT=${OPENBB_PAT}
       - KIMI_CLIENT_ID=${KIMI_CLIENT_ID}
       - KIMI_CLIENT_SECRET=${KIMI_CLIENT_SECRET}
       - NEO4J_URI=bolt://neo4j:7687

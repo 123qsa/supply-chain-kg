@@ -5,10 +5,10 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application configuration"""
 
-    # OpenBB
-    openbb_pat: str = ""
+    # Environment
+    environment: str = "development"
 
-    # Kimi OAuth
+    # Kimi OAuth (optional)
     kimi_client_id: str = ""
     kimi_client_secret: str = ""
 

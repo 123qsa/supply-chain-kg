@@ -1,7 +1,7 @@
 """Collection tools for gathering company data and prices"""
 from typing import List, Dict, Any, Optional
 import logging
-from clients import OpenBBClient, AkShareClient
+from clients import YahooFinanceClient, AkShareClient
 
 logger = logging.getLogger(__name__)
 
@@ -18,24 +18,25 @@ async def get_profile(symbol: str, market: str = "us") -> Optional[Dict[str, Any
     """
     try:
         if market == "us":
-            async with OpenBBClient() as client:
-                profile = await client.get_profile(symbol)
-                return {
-                    "ticker": symbol,
-                    "name": profile.get("name", ""),
-                    "sector": profile.get("sector", ""),
-                    "industry": profile.get("industry", ""),
-                    "description": profile.get("description", ""),
-                    "employees": profile.get("employees", 0),
-                    "country": profile.get("country", ""),
-                    "website": profile.get("website", ""),
-                    "market_cap": profile.get("market_cap", None),
-                    "market": "us",
-                    "source": "openbb"
-                }
+            async with YahooFinanceClient() as client:
+                profile = client.get_profile(symbol)
+                if profile:
+                    return {
+                        "ticker": symbol,
+                        "name": profile.get("name", ""),
+                        "sector": profile.get("sector", ""),
+                        "industry": profile.get("industry", ""),
+                        "description": profile.get("description", ""),
+                        "employees": profile.get("employees", 0),
+                        "country": profile.get("country", ""),
+                        "website": profile.get("website", ""),
+                        "market_cap": profile.get("market_cap"),
+                        "market": "us",
+                        "source": "yahoo_finance"
+                    }
+                return None
         else:
             # For CN market, construct basic profile from symbol
-            # AkShare doesn't have a direct profile API like OpenBB
             return {
                 "ticker": symbol,
                 "name": symbol,  # Will be populated later
@@ -64,8 +65,8 @@ async def get_price(
 
     Args:
         symbol: Stock symbol
-        start_date: Start date (YYYY-MM-DD for US, YYYYMMDD for CN)
-        end_date: End date (same format as start_date)
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
         market: Market type ("us" or "cn")
 
     Returns:
@@ -73,16 +74,16 @@ async def get_price(
     """
     try:
         if market == "us":
-            async with OpenBBClient() as client:
-                prices = await client.get_price(symbol, start_date, end_date)
+            async with YahooFinanceClient() as client:
+                prices = client.get_price(symbol, start_date, end_date)
                 return [
                     {
                         "date": p.get("date"),
-                        "open": float(p.get("open", 0)),
-                        "high": float(p.get("high", 0)),
-                        "low": float(p.get("low", 0)),
-                        "close": float(p.get("close", 0)),
-                        "volume": int(p.get("volume", 0)),
+                        "open": p.get("open"),
+                        "high": p.get("high"),
+                        "low": p.get("low"),
+                        "close": p.get("close"),
+                        "volume": p.get("volume"),
                         "ticker": symbol,
                         "market": "us"
                     }
@@ -93,8 +94,8 @@ async def get_price(
             start_cn = start_date.replace("-", "")
             end_cn = end_date.replace("-", "")
 
-            ak_client = AkShareClient()
-            prices = ak_client.get_cn_price(symbol, start_cn, end_cn)
+            with AkShareClient() as client:
+                prices = client.get_cn_price(symbol, start_cn, end_cn)
 
             # Map Chinese column names to standard format
             return [
@@ -127,33 +128,32 @@ async def get_financials(symbol: str, market: str = "us") -> Optional[Dict[str, 
     """
     try:
         if market == "us":
-            async with OpenBBClient() as client:
-                financials = await client.get_financials(symbol)
-                return {
-                    "ticker": symbol,
-                    "revenue": financials.get("revenue", None),
-                    "net_income": financials.get("net_income", None),
-                    "total_assets": financials.get("total_assets", None),
-                    "total_debt": financials.get("total_debt", None),
-                    "cash": financials.get("cash", None),
-                    "pe_ratio": financials.get("pe_ratio", None),
-                    "pb_ratio": financials.get("pb_ratio", None),
-                    "market": "us",
-                    "source": "openbb"
-                }
+            async with YahooFinanceClient() as client:
+                financials = client.get_financials(symbol)
+                if financials:
+                    return {
+                        "ticker": symbol,
+                        "revenue": financials.get("revenue"),
+                        "net_income": financials.get("net_income"),
+                        "total_assets": financials.get("total_assets"),
+                        "total_debt": financials.get("total_debt"),
+                        "market": "us",
+                        "source": "yahoo_finance"
+                    }
+                return None
         else:
-            ak_client = AkShareClient()
-            financials = ak_client.get_cn_financial(symbol)
+            with AkShareClient() as client:
+                financials = client.get_cn_financial(symbol)
             if financials:
                 latest = financials[0] if isinstance(financials, list) else financials
                 return {
                     "ticker": symbol,
-                    "revenue": latest.get("营业收入", None),
-                    "net_income": latest.get("净利润", None),
-                    "total_assets": latest.get("总资产", None),
-                    "total_debt": latest.get("总负债", None),
-                    "cash": latest.get("货币资金", None),
-                    "pe_ratio": None,  # May need separate API
+                    "revenue": latest.get("营业收入"),
+                    "net_income": latest.get("净利润"),
+                    "total_assets": latest.get("总资产"),
+                    "total_debt": latest.get("总负债"),
+                    "cash": latest.get("货币资金"),
+                    "pe_ratio": None,
                     "pb_ratio": None,
                     "market": "cn",
                     "source": "akshare"

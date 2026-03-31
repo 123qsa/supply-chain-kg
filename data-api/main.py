@@ -71,7 +71,8 @@ async def status():
         "features": {
             "neo4j": bool(settings.neo4j_uri),
             "postgres": bool(settings.postgres_host),
-            "openbb": bool(settings.openbb_pat),
+            "yahoo_finance": True,  # Free, always available
+            "akshare": True,  # Free, always available
             "kimi": bool(settings.kimi_client_id)
         }
     }

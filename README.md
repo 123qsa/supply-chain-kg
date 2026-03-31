@@ -43,8 +43,8 @@ A comprehensive supply chain knowledge graph system with Neo4j (memory layer) an
               ▼                               ▼
 ┌─────────────────────────┐     ┌─────────────────────────┐
 │  TimescaleDB            │     │  External Data Sources  │
-│  • Price time-series    │     │  • OpenBB (US/Global)   │
-│  • Discovery logs       │     │  • AkShare (A-share)    │
+│  • Price time-series    │     │  • Yahoo Finance (Free) │
+│  • Discovery logs       │     │  • AkShare (A-share CN) │
 │  • Impact analysis log  │     │                         │
 └─────────────────────────┘     └─────────────────────────┘
 ```
@@ -234,10 +234,11 @@ POSTGRES_DB=supply_chain
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 
-# OpenBB (US/Global markets)
-OPENBB_PAT=your_personal_access_token
+# Data Sources (Free, no API keys required)
+# - Yahoo Finance: Free data for US/Global markets
+# - AkShare: Free data for A-share (CN) markets
 
-# Kimi (LLM)
+# Kimi (LLM) - Optional, for AI analysis
 KIMI_CLIENT_ID=your_client_id
 KIMI_CLIENT_SECRET=your_client_secret
 

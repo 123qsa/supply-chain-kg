@@ -6,7 +6,7 @@ uvicorn[standard]==0.27.0
 mcp==1.0.0
 
 # Data Sources
-openbb==4.0.0
+yfinance==0.2.36
 akshare==1.12.0
 
 # Database
@@ -18,6 +18,10 @@ redis==5.0.1
 # HTTP Client
 httpx==0.26.0
 aiohttp==3.9.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.3
 
 # Validation
 pydantic==2.5.0
