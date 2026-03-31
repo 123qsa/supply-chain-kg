@@ -26,6 +26,11 @@ async def analyze_event_impact(
 
     try:
         async with KimiClient() as kimi:
+            # Check if Kimi is configured
+            if not kimi.is_configured():
+                logger.warning("Kimi not configured, returning mock analysis")
+                return _generate_mock_analysis(event, companies)
+
             # Prepare company data with relationship paths
             enriched_companies = []
             for c in companies:
@@ -44,7 +49,8 @@ async def analyze_event_impact(
 
             if result.get("error"):
                 logger.error(f"Kimi analysis error: {result['error']}")
-                return []
+                # Fallback to mock analysis
+                return _generate_mock_analysis(event, companies)
 
             # Process and validate results
             impacts = result.get("results", [])
@@ -66,7 +72,36 @@ async def analyze_event_impact(
 
     except Exception as e:
         logger.error(f"analyze_event_impact failed: {e}")
-        return []
+        return _generate_mock_analysis(event, companies)
+
+
+def _generate_mock_analysis(event: str, companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generate mock analysis when Kimi is not available
+
+    Args:
+        event: Event description
+        companies: List of company data
+
+    Returns:
+        Mock impact assessments
+    """
+    results = []
+    for c in companies[:10]:  # Limit to top 10
+        depth = c.get("depth", 1)
+        # Deeper nodes get lower confidence
+        confidence = max(0.3, 0.9 - (depth * 0.15))
+
+        results.append({
+            "ticker": c.get("ticker", ""),
+            "company": c.get("name", ""),
+            "direction": "中性",
+            "magnitude": "低" if depth > 1 else "中",
+            "reasoning": f"模拟分析: 与事件源距离{depth}跳，影响较小",
+            "confidence": round(confidence, 2),
+            "event": event,
+            "source": "mock"
+        })
+    return results
 
 
 def _build_name_chain(path: List[Dict[str, Any]]) -> List[str]:
